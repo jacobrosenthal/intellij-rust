@@ -25,7 +25,7 @@ class RsHighlightingAnnotatorTest : RsAnnotatorTestBase(RsHighlightingAnnotator:
         }
     """)
 
-    fun `test fields and methods`() = checkHighlighting("""
+    fun `test fields`() = checkHighlighting("""
         struct <STRUCT>T</STRUCT>(<PRIMITIVE_TYPE>i32</PRIMITIVE_TYPE>);
         struct <STRUCT>S</STRUCT>{ <FIELD>field</FIELD>: <STRUCT>T</STRUCT>}
         fn <FUNCTION>main</FUNCTION>() {
@@ -38,14 +38,31 @@ class RsHighlightingAnnotatorTest : RsAnnotatorTestBase(RsHighlightingAnnotator:
         fn <FUNCTION>main</FUNCTION>() {}
         struct <STRUCT>S</STRUCT>;
         impl <STRUCT>S</STRUCT> {
-            fn <ASSOC_FUNCTION>foo</ASSOC_FUNCTION>() {}
+            fn <METHOD>foo</METHOD>(&self) {}
+            fn <METHOD>bar</METHOD>() {}
         }
         trait <TRAIT>T</TRAIT> {
-            fn <ASSOC_FUNCTION>foo</ASSOC_FUNCTION>();
-            fn <ASSOC_FUNCTION>bar</ASSOC_FUNCTION>() {}
+            fn <METHOD>foo</METHOD>(&self);
+            fn <METHOD>bar</METHOD>() {}
         }
         impl <TRAIT><TRAIT>T</TRAIT></TRAIT> for <STRUCT>S</STRUCT> {
-            fn <ASSOC_FUNCTION>foo</ASSOC_FUNCTION>() {}
+            fn <METHOD>foo</METHOD>(&self) {}
+            fn <METHOD>bar</METHOD>() {}
+        }
+    """)
+
+    fun `test function and method calls`() = checkHighlighting("""
+        fn <FUNCTION>function</FUNCTION>() {}
+        struct Foo;
+        impl Foo {
+            fn <METHOD>method</METHOD>(&self) {}
+            fn <ASSOC_FUNCTION>assoc_function</ASSOC_FUNCTION>() {}
+        }
+        fn <FUNCTION>check</FUNCTION><T: FnOnce(i32)>(<PARAMETER>f</PARAMETER>: T) {
+            <FUNCTION_CALL>function</FUNCTION_CALL>();
+            <STRUCT>Foo</STRUCT>.<FUNCTION_CALL>method</FUNCTION_CALL>();
+            <STRUCT>Foo</STRUCT>::<ASSOC_FUNCTION>assoc_function</ASSOC_FUNCTION>();
+            <PARAMETER>f</PARAMETER>(123);
         }
     """)
 
@@ -125,7 +142,7 @@ class RsHighlightingAnnotatorTest : RsAnnotatorTestBase(RsHighlightingAnnotator:
             pub mod <MODULE>bar</MODULE> {}
         }
 
-        trait <TRAIT>Foo</TRAIT> { fn <ASSOC_FUNCTION>foo</ASSOC_FUNCTION>(_: Self) -> Self; }
+        trait <TRAIT>Foo</TRAIT> { fn <METHOD>foo</METHOD>(_: Self) -> Self; }
     """, checkWarn = false, ignoreExtraHighlighting = false)
 
     fun `test primitive`() = checkHighlighting("""
@@ -141,7 +158,7 @@ class RsHighlightingAnnotatorTest : RsAnnotatorTestBase(RsHighlightingAnnotator:
     @ProjectDescriptor(WithStdlibAndDependencyRustProjectDescriptor::class)
     fun `test crate`() = checkHighlighting("""
         extern crate <CRATE>dep_lib_target</CRATE>;
-        
+
         use <CRATE>std</CRATE>::<MODULE>io</MODULE>::<TRAIT>Read</TRAIT>;
     """)
 
