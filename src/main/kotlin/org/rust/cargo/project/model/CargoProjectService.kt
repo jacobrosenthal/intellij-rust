@@ -28,11 +28,97 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * [CargoProjectsService] stores a list of `Cargo.toml` file,
- * registered with the current IDE project. Each `Cargo.toml`
- * is represented by a [CargoProject], whose main attribute is
- * `workspace`: a description of a Cargo project acquired from
- * Cargo itself via `cargo metadata` command.
+ * Stores a list of [CargoProject]s associated with the current IntelliJ [Project].
+ * Use [Project.cargoProjects] to get an instance of the service.
+ *
+ * # Project model
+ *
+ * ```
+ *                   [CargoProject]
+ *                         |
+ *                 [CargoWorkspace]
+ *                   /          \
+ *              [Package]   [Package]
+ *                /   \         |
+ *         [Target] [Target] [Target]
+ *        (main.rs) (lib.rs) (lib.rs)
+ * ```
+ *
+ * ## CargoProject
+ *
+ * [CargoProject] is basically a `Cargo.toml` file inside a project source folder
+ * that is linked to the current IDE project via [attachCargoProject] (usually
+ * there is a single project). Each valid [CargoProject] should contain
+ * exactly one [CargoWorkspace] (see [CargoProject.workspace]). A workspace
+ * can be null if project is not valid (project is in updating state, Cargo is
+ * not installed, broken `Cargo.toml`, etc).
+ *
+ * ## CargoWorkspace
+ *
+ * [CargoWorkspace] is attached to each valid [CargoProject] and stores info
+ * about its packages (see [CargoWorkspace.packages]). A workspace is acquired
+ * from Cargo itself via `cargo metadata` command.
+ *
+ * ## Package
+ *
+ * [CargoWorkspace.Package] is a thing that can be considered as a dependency (has
+ * a name and version) and can have dependencies. A package can consist of multiple
+ * binary (executable) targets and/or one library target. Package is described by
+ * `[package]` section of `Cargo.toml`
+ *
+ * ## Target
+ *
+ * [CargoWorkspace.Target] is a thing that can be compiled to some binary artifact,
+ * e.g. executable binary, library, example library/executable, test executable.
+ * Each target has crate root (see [CargoWorkspace.Target.crateRoot]) which is
+ * usually `main.rs` or `lib.rs`.
+ *
+ * # FAQ
+ *
+ * Q: How is [CargoProject] different from [CargoWorkspace]?
+ *
+ * A: They are mostly the same, i.e. they are linked to each other. The most
+ *   difference is that [CargoWorkspace] is acquired from external tool,
+ *   and so can be `null` sometimes, when [CargoProject] is always persisted.
+ *
+ * Q: How [CargoWorkspace] relates to `[workspace]` section in `Cargo.toml`?
+ *
+ * A: Each Cargo project has a workspace even if there is no `[workspace]` in
+ *   the `Cargo.toml`. With `[workspace]` the [CargoWorkspace] contains all
+ *   `[workspace.members]` packages.
+ *
+ * Q: How is [CargoWorkspace.Package] different from [CargoWorkspace.Target]?
+ *
+ * A: [CargoWorkspace.Package] can consist of multiple [CargoWorkspace.Target].
+ *   E.g. some package can consist of common library target, multiple binariy
+ *   targets that use it, test targets, benchmark targets, etc.
+ *
+ * Q: What is `Cargo.toml` dependency in the terms of this model?
+ *
+ * A: Dependency (that is `foo = "1.0"` in `Cargo.toml`) is a
+ *   [CargoWorkspace.Package] (of specified name and version) with one
+ *   _library_ target. See [CargoWorkspace.Package.dependencies]
+ *
+ * Q: What is a Rust crate in the terms of this model?
+ *
+ * A: It is always [CargoWorkspace.Target]. In the case of `extern crate foo;`
+ *   it is a library [CargoWorkspace.Target] (with a name `foo`) of some
+ *   dependency package of the current package.
+ *
+ * Q: How is [CargoWorkspace.Package.name] different from [CargoWorkspace.Target.name]?
+ *
+ * A: [CargoWorkspace.Package.name] is a name of a dependency that should be mentioned in
+ *   `[dependencies]` section of `Cargo.toml`. [CargoWorkspace.Target.name] is a name
+ *   that visible in the Rust code, e.g. in `extern crate` syntax. Usually they are equal.
+ *   A name of a package can be specified by `[package.name]` property in `Cargo.toml`.
+ *   A name of a target can be specified in sections like `[lib]`, `[[bin]]`, etc.
+ *   Also, name of a dependency target can be changed.
+ *   See https://github.com/rust-lang/cargo/issues/5653
+ *
+ *
+ * See https://github.com/rust-lang/cargo/blob/master/src/cargo/core/workspace.rs
+ * See https://github.com/rust-lang/cargo/blob/master/src/cargo/core/package.rs
+ * See https://github.com/rust-lang/cargo/blob/d0f82841/src/cargo/core/manifest.rs#L228
  */
 interface CargoProjectsService {
     val allProjects: Collection<CargoProject>
@@ -41,6 +127,9 @@ interface CargoProjectsService {
     fun findProjectForFile(file: VirtualFile): CargoProject?
     fun findPackageForFile(file: VirtualFile): CargoWorkspace.Package?
 
+    /**
+     * @param manifest a path to `Cargo.toml` manifest of the project we want to link
+     */
     fun attachCargoProject(manifest: Path): Boolean
     fun detachCargoProject(cargoProject: CargoProject)
     fun refreshAllProjects(): CompletableFuture<List<CargoProject>>
@@ -78,6 +167,8 @@ interface CargoProjectsService {
 val Project.cargoProjects get() = service<CargoProjectsService>()
 
 /**
+ * See docs for [CargoProjectsService].
+ *
  * Instances of this class are immutable and will be re-created on each project refresh.
  * This class implements [UserDataHolderEx] interface and therefore any data can be attached
  * to it. Note that since instances of this class are re-created on each project refresh,

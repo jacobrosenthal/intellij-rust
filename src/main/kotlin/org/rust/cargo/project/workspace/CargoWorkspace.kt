@@ -9,6 +9,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.util.text.SemVer
 import org.jetbrains.annotations.TestOnly
+import org.rust.cargo.project.model.CargoProjectsService
 import org.rust.cargo.project.model.RustcInfo
 import org.rust.cargo.util.AutoInjectedCrates.CORE
 import org.rust.cargo.util.AutoInjectedCrates.STD
@@ -22,7 +23,7 @@ import java.util.*
 /**
  * Rust project model represented roughly in the same way as in Cargo itself.
  *
- * [org.rust.cargo.project.model.CargoProjectsService] manages workspaces.
+ * [CargoProjectsService] manages workspaces.
  */
 interface CargoWorkspace {
     val manifestPath: Path
@@ -30,6 +31,11 @@ interface CargoWorkspace {
 
     val workspaceRootPath: Path?
 
+    /**
+     * Flatten packages including workspace members, dependencies, transitive dependencies
+     * and stdlib. Use `packages.filter { it.origin == PackageOrigin.WORKSPACE }` to
+     * obtain workspace members.
+     */
     val packages: Collection<Package>
     fun findPackage(name: String): Package? = packages.find { it.name == name || it.normName == name }
 
@@ -42,6 +48,7 @@ interface CargoWorkspace {
     @TestOnly
     fun withEdition(edition: Edition): CargoWorkspace
 
+    /** See docs for [CargoProjectsService] */
     interface Package {
         val contentRoot: VirtualFile?
         val rootDirectory: Path
@@ -67,6 +74,7 @@ interface CargoWorkspace {
             if (this.normName == normName) libTarget else dependencies.find { it.name == normName }?.pkg?.libTarget
     }
 
+    /** See docs for [CargoProjectsService] */
     interface Target {
         val name: String
         // target name must be a valid Rust identifier, so normalize it by mapping `-` to `_`
