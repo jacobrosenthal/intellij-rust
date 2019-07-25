@@ -19,6 +19,7 @@ import com.intellij.task.impl.ProjectModelBuildTaskImpl
 import org.rust.cargo.project.model.cargoProjects
 import org.rust.cargo.project.settings.rustSettings
 import org.rust.cargo.runconfig.CargoCommandRunner
+import org.rust.cargo.runconfig.buildtool.CargoBuildManager.CANCELED_BUILD_RESULT
 import org.rust.cargo.runconfig.command.CargoCommandConfiguration
 import org.rust.cargo.runconfig.createCargoCommandRunConfiguration
 import org.rust.cargo.toolchain.CargoCommandLine
@@ -100,7 +101,24 @@ class CargoBuildTaskRunner : ProjectTaskRunner() {
     }
 
     fun executeTask(task: ProjectTask, callback: ProjectTaskNotification?) {
-        callback?.finished(ProjectTaskResult(false, 0, 0))
+        val result = if (task is ProjectModelBuildTask<*>) {
+            CargoBuildManager.build(task.buildableElement as CargoBuildConfiguration)
+        } else {
+            CANCELED_BUILD_RESULT
+        }
+
+        if (callback != null) {
+            try {
+                val buildResult = result.get()
+                callback.finished(ProjectTaskResult(
+                    buildResult.canceled,
+                    if (buildResult.succeeded) 0 else Integer.max(1, buildResult.errors),
+                    buildResult.warnings
+                ))
+            } catch (e: ExecutionException) {
+                callback.finished(ProjectTaskResult(false, 1, 0))
+            }
+        }
     }
 }
 
