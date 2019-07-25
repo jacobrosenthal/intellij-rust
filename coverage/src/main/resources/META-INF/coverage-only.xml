@@ -1,6 +1,7 @@
 <idea-plugin>
     <extensions defaultExtensionNs="com.intellij">
         <programRunner implementation="org.rust.coverage.GrcovRunner"/>
+        <programRunner implementation="org.rust.coverage.legacy.GrcovRunnerLegacy"/>
         <coverageEngine implementation="org.rust.coverage.RsCoverageEngine"/>
         <coverageRunner implementation="org.rust.coverage.RsCoverageRunner"/>
         <projectService serviceImplementation="org.rust.coverage.RsCoverageAnnotator"/>
