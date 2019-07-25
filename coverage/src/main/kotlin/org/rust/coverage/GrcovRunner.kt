@@ -10,13 +10,16 @@ import com.intellij.coverage.CoverageHelper
 import com.intellij.coverage.CoverageRunnerData
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.configuration.EnvironmentVariablesData
-import com.intellij.execution.configurations.*
+import com.intellij.execution.configurations.ConfigurationInfoProvider
+import com.intellij.execution.configurations.RunConfigurationBase
+import com.intellij.execution.configurations.RunProfileState
+import com.intellij.execution.configurations.RunnerSettings
 import com.intellij.execution.configurations.coverage.CoverageEnabledConfiguration
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessAdapter
 import com.intellij.execution.process.ProcessEvent
-import com.intellij.execution.runners.DefaultProgramRunner
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.intellij.execution.runners.ProgramRunner
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.diagnostic.Logger
@@ -27,36 +30,31 @@ import com.intellij.openapi.vfs.VirtualFile
 import org.rust.cargo.CargoConstants.ProjectLayout
 import org.rust.cargo.project.settings.toolchain
 import org.rust.cargo.runconfig.CargoRunStateBase
-import org.rust.cargo.runconfig.command.CargoCommandConfiguration
+import org.rust.cargo.runconfig.RsExecutableRunner
 import org.rust.cargo.toolchain.Cargo.Companion.checkNeedInstallGrcov
 import org.rust.cargo.toolchain.CargoCommandLine
 import org.rust.stdext.toPath
 import java.io.File
 
-class GrcovRunner : DefaultProgramRunner() {
-    override fun getRunnerId(): String = "GrcovRunner"
+private const val ERROR_MESSAGE_TITLE: String = "Unable to collect coverage"
 
-    override fun canRun(executorId: String, profile: RunProfile): Boolean {
-        if (executorId != CoverageExecutor.EXECUTOR_ID || profile !is CargoCommandConfiguration) return false
-        val cleaned = profile.clean().ok ?: return false
-        return cleaned.cmd.command in listOf("run", "test")
-    }
+class GrcovRunner : RsExecutableRunner(CoverageExecutor.EXECUTOR_ID, ERROR_MESSAGE_TITLE) {
+    override fun getRunnerId(): String = RUNNER_ID
 
     override fun createConfigurationData(settingsProvider: ConfigurationInfoProvider?): RunnerSettings {
         return CoverageRunnerData()
     }
 
-    override fun doExecute(state: RunProfileState, environment: ExecutionEnvironment): RunContentDescriptor? {
-        if (state !is CargoRunStateBase) return null
-        if (checkNeedInstallGrcov(environment.project)) return null
-
+    override fun execute(environment: ExecutionEnvironment, callback: ProgramRunner.Callback?, state: RunProfileState) {
+        if (checkNeedInstallGrcov(environment.project)) return
+        (state as CargoRunStateBase).addCommandLinePatch(cargoCoveragePatch)
         val workingDirectory = state.commandLine.workingDirectory.toFile()
         cleanOldCoverageData(workingDirectory)
+        super.execute(environment, callback, state)
+    }
 
-        state.addCommandLinePatch { commandLine ->
-            commandLine.copy(environmentVariables = patchVariables(commandLine))
-        }
-
+    override fun doExecute(state: RunProfileState, environment: ExecutionEnvironment): RunContentDescriptor? {
+        val workingDirectory = (state as CargoRunStateBase).commandLine.workingDirectory.toFile()
         val descriptor = super.doExecute(state, environment)
         descriptor?.processHandler?.addProcessListener(object : ProcessAdapter() {
             override fun processTerminated(event: ProcessEvent) {
@@ -68,6 +66,20 @@ class GrcovRunner : DefaultProgramRunner() {
 
     companion object {
         private val LOG: Logger = Logger.getInstance(GrcovRunner::class.java)
+
+        const val RUNNER_ID: String = "GrcovRunner"
+
+        private val cargoCoveragePatch: (CargoCommandLine) -> CargoCommandLine = { commandLine ->
+            val oldVariables = commandLine.environmentVariables
+            val environmentVariables = EnvironmentVariablesData.create(
+                oldVariables.envs + mapOf(
+                    "CARGO_INCREMENTAL" to "0",
+                    "RUSTFLAGS" to "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Zno-landing-pads"
+                ),
+                oldVariables.isPassParentEnvs
+            )
+            commandLine.copy(environmentVariables = environmentVariables)
+        }
 
         private fun cleanOldCoverageData(workingDirectory: File) {
             val root = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(workingDirectory) ?: return
@@ -83,17 +95,6 @@ class GrcovRunner : DefaultProgramRunner() {
 
             if (toDelete.isEmpty()) return
             WriteAction.runAndWait<Throwable> { toDelete.forEach { it.delete(null) } }
-        }
-
-        private fun patchVariables(commandLine: CargoCommandLine): EnvironmentVariablesData {
-            val oldVariables = commandLine.environmentVariables
-            return EnvironmentVariablesData.create(
-                oldVariables.envs + mapOf(
-                    "CARGO_INCREMENTAL" to "0",
-                    "RUSTFLAGS" to "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Zno-landing-pads"
-                ),
-                oldVariables.isPassParentEnvs
-            )
         }
 
         private fun startCollectingCoverage(workingDirectory: File, environment: ExecutionEnvironment) {

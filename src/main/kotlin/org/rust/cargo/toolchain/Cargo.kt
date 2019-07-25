@@ -223,6 +223,8 @@ class Cargo(private val cargoExecutable: Path) {
 
         data class GeneratedFilesHolder(val manifest: VirtualFile, val sourceFiles: List<VirtualFile>)
 
+        val cargoCommonPatch: (CargoCommandLine) -> CargoCommandLine = { patchArgs(it, true) }
+
         fun patchArgs(commandLine: CargoCommandLine, colors: Boolean): CargoCommandLine {
             val (pre, post) = commandLine.splitOnDoubleDash()
                 .let { (pre, post) -> pre.toMutableList() to post.toMutableList() }

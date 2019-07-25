@@ -25,8 +25,8 @@ class CargoTestRunState(
 
     init {
         consoleBuilder = CargoTestConsoleBuilder(environment.runProfile as RunConfiguration, environment.executor)
-        addCommandLinePatch { commandLine -> commandLine.copy(additionalArguments = patchArgs(commandLine)) }
-        createFilters().forEach { consoleBuilder.addFilter(it) }
+        addCommandLinePatch(cargoTestPatch)
+        createFilters(cargoProject).forEach { consoleBuilder.addFilter(it) }
     }
 
     override fun execute(executor: Executor, runner: ProgramRunner<*>): ExecutionResult {
@@ -37,44 +37,29 @@ class CargoTestRunState(
     }
 
     companion object {
+        val cargoTestPatch: (CargoCommandLine) -> CargoCommandLine = { commandLine ->
+            commandLine.copy(additionalArguments = patchArgs(commandLine))
+        }
+
         @VisibleForTesting
-        fun patchArgs(cmd: CargoCommandLine): List<String> {
-            val (cargoArgs, libtestArgs) = cmd.splitOnDoubleDash()
-                .let { it.first.toMutableList() to it.second.toMutableList() }
+        fun patchArgs(commandLine: CargoCommandLine): List<String> {
+            val (pre, post) = commandLine.splitOnDoubleDash()
+                .let { (pre, post) -> pre.toMutableList() to post.toMutableList() }
 
-            val noFailFast = "--no-fail-fast"
-
-            if (noFailFast !in cargoArgs) {
-                cargoArgs.add(noFailFast)
+            val noFailFastOption = "--no-fail-fast"
+            if (noFailFastOption !in pre) {
+                pre.add(noFailFastOption)
             }
 
-            val noFormatJson = "--format=json"
-            val format = "--format"
-            val noUnstableOptions = "-Z"
-
-            if (noUnstableOptions !in libtestArgs) {
-                libtestArgs.add(noUnstableOptions)
-                libtestArgs.add("unstable-options")
-            }
-            val idx = libtestArgs.indexOf("--format")
-            val indexArgWithValue = libtestArgs.indexOfFirst { it.startsWith(format) }
-            if (idx != -1) {
-                if (idx < libtestArgs.size - 1) {
-                    if (!libtestArgs[idx + 1].startsWith("-")) {
-                        libtestArgs[idx + 1] = "json"
-                    } else {
-                        libtestArgs.add(idx + 1, "json")
-                    }
-                } else {
-                    libtestArgs.add("json")
-                }
-            } else if (indexArgWithValue != -1) {
-                libtestArgs[indexArgWithValue] = "--format=json"
-            } else {
-                libtestArgs.add(noFormatJson)
+            val unstableOption = "-Z"
+            if (unstableOption !in post) {
+                post.add(unstableOption)
+                post.add("unstable-options")
             }
 
-            return cargoArgs + "--" + libtestArgs
+            addFormatJsonOption(post, "--format")
+
+            return if (post.isEmpty()) pre else pre + "--" + post
         }
     }
 }
