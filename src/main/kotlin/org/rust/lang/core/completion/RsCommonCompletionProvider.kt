@@ -40,7 +40,7 @@ import org.rust.openapiext.Testmark
 object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
     override fun addCompletions(
         parameters: CompletionParameters,
-        context: ProcessingContext,
+        _context: ProcessingContext,
         result: CompletionResultSet
     ) {
         // Use original position if possible to re-use caches of the real file
@@ -51,10 +51,12 @@ object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
         // This set will contain the names of all paths that have been added to the `result` by this provider.
         val processedPathNames = hashSetOf<String>()
 
-        val isSimplePath = simplePathPattern.accepts(parameters.position)
-        val expectedTy = getExpectedTypeForEnclosingPathOrDotExpr(element)
+        val context = RsCompletionContext(
+            expectedTy = getExpectedTypeForEnclosingPathOrDotExpr(element),
+            isSimplePath = simplePathPattern.accepts(parameters.position)
+        )
 
-        collectCompletionVariants(result, isSimplePath, expectedTy) {
+        collectCompletionVariants(result, context) {
             when (element) {
                 is RsAssocTypeBinding -> processAssocTypeVariants(element, it)
                 is RsExternCrateItem -> processExternCrateResolveVariants(element, true, it)
@@ -89,19 +91,18 @@ object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
         }
 
         if (element is RsMethodOrField) {
-            addMethodAndFieldCompletion(element, result, isSimplePath, expectedTy)
+            addMethodAndFieldCompletion(element, result, context)
         }
 
-        if (isSimplePath && RsCodeInsightSettings.getInstance().suggestOutOfScopeItems) {
-            addCompletionsFromIndex(parameters, result, processedPathNames, expectedTy)
+        if (context.isSimplePath && RsCodeInsightSettings.getInstance().suggestOutOfScopeItems) {
+            addCompletionsFromIndex(parameters, result, processedPathNames, context.expectedTy)
         }
     }
 
     private fun addMethodAndFieldCompletion(
         element: RsMethodOrField,
         result: CompletionResultSet,
-        forSimplePath: Boolean = false,
-        expectedTy: Ty? = null
+        context: RsCompletionContext
     ) {
         val receiver = element.receiver.safeGetOriginalOrSelf()
         val lookup = ImplLookup.relativeTo(receiver)
@@ -111,7 +112,7 @@ object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
         } else {
             ::processDotExprResolveVariants
         }
-        val processor = methodAndFieldCompletionProcessor(element, result, forSimplePath, expectedTy)
+        val processor = methodAndFieldCompletionProcessor(element, result, context)
 
         processResolveVariants(
             lookup,
@@ -169,11 +170,9 @@ object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
                 .map { candidate ->
                     val item = candidate.qualifiedNamedItem.item
                     createLookupElement(
-                        element = item,
-                        scopeName = elementName,
+                        scopeEntry = SimpleScopeEntry(elementName, item),
+                        context = RsCompletionContext(expectedTy = expectedTy, isSimplePath = true),
                         locationString = candidate.info.usePath,
-                        forSimplePath = true,
-                        expectedTy = expectedTy,
                         insertHandler = object : RsDefaultInsertHandler() {
                             override fun handleInsert(
                                 element: RsElement,
@@ -219,6 +218,8 @@ object RsCommonCompletionProvider : CompletionProvider<CompletionParameters>() {
         val pathCompletionFromIndex = Testmark("pathCompletionFromIndex")
     }
 }
+
+data class RsCompletionContext(val expectedTy: Ty? = null, val isSimplePath: Boolean = false)
 
 private fun filterAssocTypes(
     path: RsPath,
@@ -284,24 +285,19 @@ private fun filterMethodCompletionVariantsByTraitBounds(
 private fun methodAndFieldCompletionProcessor(
     methodOrField: RsMethodOrField,
     result: CompletionResultSet,
-    forSimplePath: Boolean = false,
-    expectedTy: Ty? = null
+    context: RsCompletionContext
 ): RsResolveProcessor = fun(e: ScopeEntry): Boolean {
     when (e) {
         is FieldResolveVariant -> result.addElement(createLookupElement(
-            element = e.element,
-            scopeName = e.name,
-            forSimplePath = forSimplePath,
-            expectedTy = expectedTy
+            scopeEntry = e,
+            context = context
         ))
         is MethodResolveVariant -> {
             if (e.element.isTest) return false
 
             result.addElement(createLookupElement(
-                element = e.element,
-                scopeName = e.name,
-                forSimplePath = forSimplePath,
-                expectedTy = expectedTy,
+                scopeEntry = e,
+                context = context,
                 insertHandler = object : RsDefaultInsertHandler() {
                     override fun handleInsert(
                         element: RsElement,

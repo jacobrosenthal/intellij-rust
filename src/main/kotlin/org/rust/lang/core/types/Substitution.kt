@@ -38,6 +38,12 @@ open class Substitution(
     fun typeParameterByName(name: String): TyTypeParameter? =
         typeSubst.keys.find { it.toString() == name }
 
+    fun substituteInKeys(map: Substitution): Substitution =
+        Substitution(
+            typeSubst.mapKeys { (key, _) -> key.substitute(map) as? TyTypeParameter ?: key },
+            regionSubst.mapKeys { (key, _) -> key.substitute(map) as? ReEarlyBound ?: key }
+        )
+
     fun substituteInValues(map: Substitution): Substitution =
         Substitution(
             typeSubst.mapValues { (_, value) -> value.substitute(map) },
